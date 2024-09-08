@@ -131,7 +131,7 @@ def mover_a_listo_menor_memoria():
 # Función para mover procesos bloqueados a listos periódicamente
 def mover_bloqueados_a_listos():
     while True:
-        time.sleep(5)  # Cada 5 segundos
+        time.sleep(10)  # Cada 10 segundos
         mover_a_listo_menor_memoria()  # Intenta mover el proceso con la menor memoria a listo
         actualizar_interfaz()
 
