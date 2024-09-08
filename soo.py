@@ -1,149 +1,365 @@
-import random
-import time
-import threading
 import tkinter as tk
-from queue import Queue
+import random
+import threading
+import time
+
+# Configuración de la memoria
+MEMORIA_TOTAL = 1000  # Memoria total disponible (en MB)
+MEMORIA_USADA = 0  # Memoria actualmente en uso (en MB)
+MAX_SWAP = 10  # Máximo número de procesos en swap
+
+# Lista de procesos en diferentes estados
+procesos = []
+procesos_nuevos = []
+procesos_listos = []
+procesos_bloqueados = []
+procesos_swap = []
+procesos_terminados = []
+proceso_ejecucion = None
 
 class Proceso:
-    def _init_(self, id_proceso, memoria_solicitada, tiempo_ejecucion):
-        self.id_proceso = id_proceso
-        self.memoria_solicitada = memoria_solicitada
-        self.tiempo_ejecucion = tiempo_ejecucion
-        self.estado = "Listo"
+    def __init__(self, id, memoria):
+        self.id = id
+        self.memoria = memoria
+        self.estado = 'Nuevos'
 
-class Simulador:
-    def _init_(self, memoria_total, interfaz):
-        self.memoria_total = memoria_total
-        self.memoria_disponible = memoria_total
-        self.cola_listos = Queue()
-        self.cola_espera = Queue()
-        self.lock = threading.Lock()
-        self.interfaz = interfaz
-        self.simulacion_activa = True  # Indicador para finalizar la simulación
+    def __str__(self):
+        return f"Proceso {self.id}: {self.estado} (Memoria: {self.memoria} MB)"
+# Clase para representar un proceso
+class Proceso:
+    def __init__(self, id, memoria):
+        self.id = id
+        self.memoria = memoria
+        self.estado = 'Listo'
 
-    def solicitar_memoria(self, proceso):
-        with self.lock:
-            if self.memoria_disponible >= proceso.memoria_solicitada:
-                self.memoria_disponible -= proceso.memoria_solicitada
-                self.cola_listos.put(proceso)
-                self.interfaz.actualizar_estado(proceso, "Listo")
-                self.interfaz.actualizar_memoria(self.memoria_disponible)
-                self.interfaz.registrar_evento(f"Proceso {proceso.id_proceso} entra en 'Listo' (Solicitó: {proceso.memoria_solicitada} MB)")
+    def __str__(self):
+        return f"Proceso {self.id}: {self.estado} (Memoria: {self.memoria} MB)"
+
+# Función para crear procesos aleatorios
+def crear_procesos_automaticos():
+    while True:
+        if len(procesos) < 30:  # Máximo 10 procesos simultáneos
+            memoria_necesaria = random.randint(50, 200)
+            agregar_proceso(memoria_necesaria)
+        time.sleep(2)
+
+# Función para agregar un proceso (manual o aleatorio)
+def agregar_proceso(memoria_necesaria):
+    global MEMORIA_USADA
+    proceso = Proceso(len(procesos) + 1, memoria_necesaria)
+    
+    if MEMORIA_USADA + memoria_necesaria <= MEMORIA_TOTAL:
+        procesos_nuevos.append(proceso)
+        proceso.estado = 'Nuevos'
+        procesos.append(proceso)
+    else:
+        # Si no hay suficiente memoria, mostrar un mensaje
+        mensaje_error.config(text="No hay suficiente memoria para el proceso, esperará en Nuevos.")
+        procesos_nuevos.append(proceso)
+        proceso.estado = 'Nuevos'
+        procesos.append(proceso)
+
+    actualizar_interfaz()
+
+# Función para mover un proceso directamente al swap
+def mover_a_swap_directo(proceso):
+    global MEMORIA_USADA
+    if len(procesos_swap) < MAX_SWAP:
+        procesos_swap.append(proceso)
+        proceso.estado = 'Swap'
+        actualizar_interfaz()
+    else:
+        # Se queda bloqueado si no hay espacio en swap
+        proceso.estado = 'Bloqueado'
+        procesos_bloqueados.append(proceso)
+        actualizar_interfaz()
+
+def nuevo_a_listo():
+    global MEMORIA_USADA
+    while True:
+        for proceso in procesos_nuevos[:]:
+            if MEMORIA_USADA + proceso.memoria <= MEMORIA_TOTAL:
+                procesos_nuevos.remove(proceso)
+                procesos_listos.append(proceso)
+                proceso.estado = 'Listo'
+                MEMORIA_USADA += proceso.memoria  # Solo suma cuando entra a Listo
+                actualizar_interfaz()
             else:
-                self.cola_espera.put(proceso)
-                self.interfaz.actualizar_estado(proceso, "Bloqueado")
-                self.interfaz.registrar_evento(f"Proceso {proceso.id_proceso} en 'Bloqueado' (Solicitó: {proceso.memoria_solicitada} MB, Memoria insuficiente)")
-
-    def liberar_memoria(self, proceso):
-        with self.lock:
-            self.memoria_disponible += proceso.memoria_solicitada
-            self.interfaz.actualizar_memoria(self.memoria_disponible)
-            self.interfaz.actualizar_estado(proceso, "Terminado")
-            self.interfaz.registrar_evento(f"Proceso {proceso.id_proceso} terminó y liberó {proceso.memoria_solicitada} MB")
-
-    def ejecutar_procesos(self):
-        while not self.cola_listos.empty() and self.simulacion_activa:
-            proceso = self.cola_listos.get()
-            self.interfaz.actualizar_estado(proceso, "Ejecutando")
-            self.interfaz.registrar_evento(f"Proceso {proceso.id_proceso} en ejecución")
-            time.sleep(proceso.tiempo_ejecucion)  # Simula el tiempo de ejecución del proceso
-            self.liberar_memoria(proceso)
-            self.verificar_espera()
-
-    def verificar_espera(self):
-        with self.lock:
-            while not self.cola_espera.empty() and self.memoria_disponible >= self.cola_espera.queue[0].memoria_solicitada:
-                proceso = self.cola_espera.get()
-                self.solicitar_memoria(proceso)
-
-    def temporizador(self):
-        while not self.cola_listos.empty() and self.simulacion_activa:
-            proceso = self.cola_listos.queue[0]  # Proceso que está en ejecución
-            self.interfaz.actualizar_estado(proceso, "Temporizado")
-            self.interfaz.registrar_evento(f"Proceso {proceso.id_proceso} temporizado")
-            time.sleep(1)  # Temporización de 1 segundo
-            self.cola_listos.put(self.cola_listos.get())  # Mueve el proceso actual al final de la cola
-
-    def finalizar_simulacion(self):
-        self.simulacion_activa = False
-        self.interfaz.registrar_evento("Simulación finalizada.")
-
-class InterfazSimulador:
-    def _init_(self, memoria_total, simulador):
-        self.simulador = simulador
-        self.root = tk.Tk()
-        self.root.title("Simulador de Gestión de Procesos y Memoria")
-
-        self.label_memoria = tk.Label(self.root, text=f"Memoria disponible: {memoria_total} MB")
-        self.label_memoria.pack()
-
-        self.label_procesos = tk.Label(self.root, text="Procesos:")
-        self.label_procesos.pack()
-
-        self.lista_procesos = tk.Listbox(self.root, width=50)
-        self.lista_procesos.pack()
-
-        self.label_historial = tk.Label(self.root, text="Historial de eventos:")
-        self.label_historial.pack()
-
-        self.historial = tk.Text(self.root, height=10, width=50, state=tk.DISABLED)
-        self.historial.pack()
-
-        self.boton_finalizar = tk.Button(self.root, text="Finalizar Simulación", command=self.finalizar)
-        self.boton_finalizar.pack()
-
-        self.procesos = {}
-
-    def actualizar_estado(self, proceso, estado):
-        proceso.estado = estado
-        self.procesos[proceso.id_proceso] = proceso
-        self.actualizar_lista_procesos()
-
-    def actualizar_memoria(self, memoria_disponible):
-        self.label_memoria.config(text=f"Memoria disponible: {memoria_disponible} MB")
-
-    def actualizar_lista_procesos(self):
-        self.lista_procesos.delete(0, tk.END)
-        for proceso in self.procesos.values():
-            self.lista_procesos.insert(tk.END, f"Proceso {proceso.id_proceso}: {proceso.estado}, Memoria: {proceso.memoria_solicitada} MB")
-
-    def registrar_evento(self, mensaje):
-        self.historial.config(state=tk.NORMAL)
-        self.historial.insert(tk.END, mensaje + "\n")
-        self.historial.config(state=tk.DISABLED)
-        self.historial.see(tk.END)
-
-    def finalizar(self):
-        self.simulador.finalizar_simulacion()
-
-    def iniciar(self):
-        self.root.mainloop()
+                # Si no hay suficiente memoria, mover a swap si hay espacio
+                if len(procesos_swap) < MAX_SWAP:
+                    procesos_nuevos.remove(proceso)
+                    procesos_swap.append(proceso)
+                    proceso.estado = 'Swap'  # Swap no afecta la memoria usada
+                    actualizar_interfaz()
+                else:
+                    mensaje_error.config(text="Memoria insuficiente y swap lleno. El proceso se mantiene en Nuevos.")
+        time.sleep(3)
 
 
-def main():
-    memoria_total = 100  # Memoria total del sistema en MB
-    interfaz = InterfazSimulador(memoria_total, None)
-    simulador = Simulador(memoria_total, interfaz)
-    interfaz.simulador = simulador
+# Función para mover un proceso de bloqueado a listo
+def mover_a_listo(proceso):
+    global MEMORIA_USADA
+    if proceso in procesos_bloqueados:
+        procesos_bloqueados.remove(proceso)
+        procesos_listos.append(proceso)
+        proceso.estado = 'Listo'
+        actualizar_interfaz()
 
-    # Creando procesos con solicitudes de memoria y tiempos de ejecución aleatorios
-    for i in range(1, 6):
-        memoria_solicitada = random.randint(10, 40)  # Memoria solicitada entre 10 y 40 MB
-        tiempo_ejecucion = random.randint(2, 5)  # Tiempo de ejecución entre 2 y 5 segundos
-        proceso = Proceso(id_proceso=i, memoria_solicitada=memoria_solicitada, tiempo_ejecucion=tiempo_ejecucion)
-        simulador.solicitar_memoria(proceso)
+# Función para mover procesos bloqueados a listos periódicamente
+# Función para mover el proceso con la menor memoria de bloqueado a listo o swap
+def mover_a_listo_menor_memoria():
+    global MEMORIA_USADA
 
-    # Ejecutar procesos con temporización
-    thread_ejecutar = threading.Thread(target=simulador.ejecutar_procesos)
-    thread_temporizar = threading.Thread(target=simulador.temporizador)
+    if procesos_bloqueados:
+        proceso_menor_memoria = min(procesos_bloqueados, key=lambda p: p.memoria)
 
-    thread_ejecutar.start()
-    thread_temporizar.start()
+        if MEMORIA_USADA + proceso_menor_memoria.memoria <= MEMORIA_TOTAL:
+            procesos_bloqueados.remove(proceso_menor_memoria)
+            procesos_listos.append(proceso_menor_memoria)
+            proceso_menor_memoria.estado = 'Listo'
+        else:
+            if len(procesos_swap) < MAX_SWAP:
+                procesos_bloqueados.remove(proceso_menor_memoria)
+                procesos_swap.append(proceso_menor_memoria)
+                proceso_menor_memoria.estado = 'Swap'
+                MEMORIA_USADA -= proceso_menor_memoria.memoria
+            else:
+                mensaje_error.config(text="No hay suficiente memoria ni espacio en Swap. El proceso sigue en Bloqueado.")
 
-    interfaz.iniciar()
+        actualizar_interfaz()
 
-    thread_ejecutar.join()
-    thread_temporizar.join()
+# Función para mover procesos bloqueados a listos periódicamente
+def mover_bloqueados_a_listos():
+    while True:
+        time.sleep(5)  # Cada 5 segundos
+        mover_a_listo_menor_memoria()  # Intenta mover el proceso con la menor memoria a listo
+        actualizar_interfaz()
 
-if _name_ == "_main_":
-    main()
+
+# Función para mover bloqueados a swap
+def mover_a_swap(proceso):
+    global MEMORIA_USADA
+    if proceso in procesos_bloqueados:
+        procesos_bloqueados.remove(proceso)
+        procesos_swap.append(proceso)
+        proceso.estado = 'Swap'
+        MEMORIA_USADA -= proceso.memoria  # Restar memoria solo cuando sale de bloqueado
+        actualizar_interfaz()
+
+
+# Función para revisar procesos en Swap y moverlos a Listos si hay suficiente memoria
+def revisar_swap():
+    global MEMORIA_USADA
+    while True:
+        for proceso in procesos_swap[:]:
+            if MEMORIA_USADA + proceso.memoria <= MEMORIA_TOTAL:
+                procesos_swap.remove(proceso)
+                procesos_listos.append(proceso)
+                proceso.estado = 'Listo'
+                MEMORIA_USADA += proceso.memoria  # Sumar memoria solo cuando sale de Swap a Listo
+                actualizar_interfaz()
+        time.sleep(1)
+
+
+# Función para simular la ejecución de procesos
+# Definir la probabilidad de que un proceso en ejecución pase a bloqueado
+PROBABILIDAD_BLOQUEO = 0.3  # 30% de probabilidad de que un proceso pase a bloqueado
+
+# Función para simular la ejecución de procesos
+def ejecutar_procesos():
+    global MEMORIA_USADA, proceso_ejecucion
+    while True:
+        if procesos_listos:
+            proceso_ejecucion = procesos_listos.pop(0)
+            proceso_ejecucion.estado = 'Ejecutando'
+            actualizar_interfaz()
+            time.sleep(3)  # Simula el tiempo de ejecución del proceso
+
+            if random.random() < PROBABILIDAD_BLOQUEO:
+                proceso_ejecucion.estado = 'Bloqueado'
+                procesos_bloqueados.append(proceso_ejecucion)
+                mensaje_error.config(text=f"El Proceso {proceso_ejecucion.id} se ha bloqueado durante la ejecución.")
+            else:
+                proceso_ejecucion.estado = 'Terminado'
+                procesos_terminados.append(proceso_ejecucion)
+                MEMORIA_USADA -= proceso_ejecucion.memoria  # Restar memoria solo cuando el proceso termina y ocupaba memoria
+
+            proceso_ejecucion = None
+        actualizar_interfaz()
+        time.sleep(1)
+
+
+# Función para manejar el evento de agregar un proceso manualmente
+def agregar_proceso_manual():
+    try:
+        memoria_necesaria = int(memoria_entry.get())
+        if memoria_necesaria > 0:
+            agregar_proceso(memoria_necesaria)
+        else:
+            tk.messagebox.showerror("Error", "La memoria debe ser un número positivo.")
+            time.sleep(3)
+    except ValueError:
+        tk.messagebox.showerror("Error", "Ingrese un valor numérico válido para la memoria.")
+        time.sleep(3)
+    finally:
+        memoria_entry.delete(0, tk.END)  # Limpiar el campo de entrada
+
+# Función para agregar un proceso aleatorio desde el botón
+def agregar_proceso_aleatorio():
+    memoria_necesaria = random.randint(50, 200)
+    agregar_proceso(memoria_necesaria)
+
+# Actualiza la interfaz gráfica
+# Actualiza la interfaz gráfica
+def actualizar_interfaz():
+    memoria_label.config(text=f"Memoria Usada: {MEMORIA_USADA}/{MEMORIA_TOTAL} MB")
+    
+    # Limpiar y actualizar lista de procesos nuevos
+    nuevos_listbox.delete(0, tk.END)
+    for p in procesos_nuevos:
+        nuevos_listbox.insert(tk.END, str(p))
+
+    # Limpiar y actualizar lista de procesos listos
+    listos_listbox.delete(0, tk.END)
+    for p in procesos_listos:
+        listos_listbox.insert(tk.END, str(p))
+
+    # Limpiar y actualizar lista de procesos bloqueados
+    bloqueados_listbox.delete(0, tk.END)
+    for p in procesos_bloqueados:
+        bloqueados_listbox.insert(tk.END, str(p))
+
+    # Limpiar y actualizar lista de procesos en swap
+    swap_listbox.delete(0, tk.END)
+    for p in procesos_swap:
+        swap_listbox.insert(tk.END, str(p))
+
+    # Limpiar y actualizar lista de procesos terminados
+    terminados_listbox.delete(0, tk.END)
+    for p in procesos_terminados:
+        terminados_listbox.insert(tk.END, str(p))
+
+    ejecucion_label.config(text=f"Proceso en Ejecución: {proceso_ejecucion if proceso_ejecucion else 'Ninguno'}")
+    mensaje_error.config(text="")  # Limpiar mensaje de error en cada actualización
+
+
+# Configuración de la interfaz gráfica con Tkinter
+ventana = tk.Tk()
+ventana.title("Simulador de Gestión de Procesos y Memoria")
+ventana.geometry("800x600")
+ventana.config(bg="#f0f0f0")
+
+# Sección superior para mostrar el uso de memoria
+frame_memoria = tk.Frame(ventana, pady=10, bg="#f0f0f0")
+frame_memoria.pack(fill=tk.X)
+
+memoria_label = tk.Label(frame_memoria, text=f"Memoria Usada: {MEMORIA_USADA}/{MEMORIA_TOTAL} MB", font=("Arial", 14, "bold"), bg="#f0f0f0")
+memoria_label.pack()
+
+# Sección para agregar procesos manualmente y aleatoriamente
+frame_agregar = tk.Frame(ventana, pady=10, padx=10, bd=2, relief=tk.RAISED, bg="#dcdcdc")
+frame_agregar.pack(fill=tk.X, pady=10)
+
+memoria_label_entry = tk.Label(frame_agregar, text="Memoria del Proceso (MB):", font=("Arial", 12), bg="#dcdcdc")
+memoria_label_entry.pack(side=tk.LEFT)
+
+memoria_entry = tk.Entry(frame_agregar, width=10, font=("Arial", 12))
+memoria_entry.pack(side=tk.LEFT, padx=5)
+
+agregar_boton = tk.Button(frame_agregar, text="Agregar Proceso", command=agregar_proceso_manual, font=("Arial", 12), bg="#90ee90")
+agregar_boton.pack(side=tk.LEFT, padx=5)
+
+# Botón para agregar proceso aleatorio
+agregar_aleatorio_boton = tk.Button(frame_agregar, text="Agregar Proceso Aleatorio", command=agregar_proceso_aleatorio, font=("Arial", 12), bg="#add8e6")
+agregar_aleatorio_boton.pack(side=tk.LEFT, padx=5)
+
+# Mensaje de error si se supera la memoria
+mensaje_error = tk.Label(frame_agregar, text="", font=("Arial", 12), fg="red", bg="#dcdcdc")
+mensaje_error.pack(side=tk.LEFT, padx=10)
+
+# Sección para mostrar la lista de procesos en diferentes estados
+frame_procesos = tk.Frame(ventana, padx=10, pady=10, bg="#f0f0f0")
+frame_procesos.pack(fill=tk.BOTH, expand=True)
+
+# Sección de procesos listos
+frame_nuevos = tk.Frame(frame_procesos, padx=10, pady=10, bd=2, relief=tk.SUNKEN, bg="#f0f0f0")
+frame_nuevos.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+nuevos_label = tk.Label(frame_nuevos, text="Procesos Nuevos", font=("Arial", 14, "bold"), bg="#f0f0f0")
+nuevos_label.pack()
+
+nuevos_listbox = tk.Listbox(frame_nuevos, font=("Arial", 12), bg="#e0f7fa")
+nuevos_listbox.pack(fill=tk.BOTH, expand=True)
+
+frame_listos = tk.Frame(frame_procesos, padx=10, pady=10, bd=2, relief=tk.SUNKEN, bg="#f0f0f0")
+frame_listos.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+listos_label = tk.Label(frame_listos, text="Procesos Listos", font=("Arial", 14, "bold"), bg="#f0f0f0")
+listos_label.pack()
+
+listos_listbox = tk.Listbox(frame_listos, font=("Arial", 12), bg="#3a6e97")
+listos_listbox.pack(fill=tk.BOTH, expand=True)
+
+# Sección de procesos bloqueados
+frame_bloqueados = tk.Frame(frame_procesos, padx=10, pady=10, bd=2, relief=tk.SUNKEN, bg="#f0f0f0")
+frame_bloqueados.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+bloqueados_label = tk.Label(frame_bloqueados, text="Procesos Bloqueados", font=("Arial", 14, "bold"), bg="#f0f0f0")
+bloqueados_label.pack()
+
+bloqueados_listbox = tk.Listbox(frame_bloqueados, font=("Arial", 12), bg="#973a3a")
+bloqueados_listbox.pack(fill=tk.BOTH, expand=True)
+
+# Sección de procesos en swap
+frame_swap = tk.Frame(frame_procesos, padx=10, pady=10, bd=2, relief=tk.SUNKEN, bg="#f0f0f0")
+frame_swap.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+swap_label = tk.Label(frame_swap, text="Procesos en Swap", font=("Arial", 14, "bold"), bg="#f0f0f0")
+swap_label.pack()
+
+swap_listbox = tk.Listbox(frame_swap, font=("Arial", 12), bg="#977f3a")
+swap_listbox.pack(fill=tk.BOTH, expand=True)
+
+# Sección de procesos terminados
+frame_terminados = tk.Frame(frame_procesos, padx=10, pady=10, bd=2, relief=tk.SUNKEN, bg="#f0f0f0")
+frame_terminados.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+terminados_label = tk.Label(frame_terminados, text="Procesos Terminados", font=("Arial", 14, "bold"), bg="#f0f0f0")
+terminados_label.pack()
+
+terminados_listbox = tk.Listbox(frame_terminados, font=("Arial", 12), bg="#40973a")
+terminados_listbox.pack(fill=tk.BOTH, expand=True)
+
+# Sección para mostrar el proceso en ejecución
+frame_ejecucion = tk.Frame(ventana, pady=10, bg="#f0f0f0")
+frame_ejecucion.pack(fill=tk.X)
+
+ejecucion_label = tk.Label(frame_ejecucion, text="Proceso en Ejecución: Ninguno", font=("Arial", 14, "bold"), bg="#f0f0f0")
+ejecucion_label.pack()
+
+# Función para finalizar la simulación
+def finalizar_simulacion():
+    ventana.quit()
+
+# Botón para finalizar la simulación
+finalizar_boton = tk.Button(ventana, text="Finalizar Simulación", command=finalizar_simulacion, font=("Arial", 14), bg="#ff6f61")
+finalizar_boton.pack(side=tk.BOTTOM, pady=10)
+
+# Inicialización de hilos
+hilo_ejecucion = threading.Thread(target=ejecutar_procesos)
+hilo_ejecucion.start()
+
+hilo_bloqueados = threading.Thread(target=mover_bloqueados_a_listos)
+hilo_bloqueados.start()
+
+hilo_nuevolisto = threading.Thread(target=nuevo_a_listo)
+hilo_nuevolisto.start()
+
+hilo_swap = threading.Thread(target=revisar_swap)
+hilo_swap.start()
+
+# Hilo para crear procesos aleatorios
+hilo_procesos_aleatorios = threading.Thread(target=crear_procesos_automaticos)
+hilo_procesos_aleatorios.start()
+
+ventana.mainloop()
