@@ -256,7 +256,7 @@ def actualizar_interfaz():
     for p in procesos_terminados:
         terminados_listbox.insert(tk.END, str(p))
 
-    ejecucion_label.config(text=f"Proceso en Ejecución: {proceso_ejecucion if proceso_ejecucion else 'Ninguno'}")
+    ejecucion_label.config(text=f"{proceso_ejecucion if proceso_ejecucion else ''}")
     mensaje_error.config(text="")  # Limpiar mensaje de error en cada actualización
 
 
@@ -293,6 +293,13 @@ agregar_aleatorio_boton.pack(side=tk.LEFT, padx=5)
 # Mensaje de error si se supera la memoria
 mensaje_error = tk.Label(frame_agregar, text="", font=("Arial", 12), fg="red", bg="#dcdcdc")
 mensaje_error.pack(side=tk.LEFT, padx=10)
+
+# seccion arriba ejecutando
+frame_ejecucion = tk.Frame(ventana, pady=10, bg="#f0f0f0")
+frame_ejecucion.pack(fill=tk.X)
+
+ejecucion_label = tk.Label(frame_ejecucion, font=("Arial", 14, "bold"), bg="#f0f0f0")
+ejecucion_label.pack()
 
 # Sección para mostrar la lista de procesos en diferentes estados
 frame_procesos = tk.Frame(ventana, padx=10, pady=10, bg="#f0f0f0")
@@ -348,11 +355,6 @@ terminados_listbox = tk.Listbox(frame_terminados, font=("Arial", 12), bg="#40973
 terminados_listbox.pack(fill=tk.BOTH, expand=True)
 
 # Sección para mostrar el proceso en ejecución
-frame_ejecucion = tk.Frame(ventana, pady=10, bg="#f0f0f0")
-frame_ejecucion.pack(fill=tk.X)
-
-ejecucion_label = tk.Label(frame_ejecucion, text="Proceso en Ejecución: Ninguno", font=("Arial", 14, "bold"), bg="#f0f0f0")
-ejecucion_label.pack()
 
 # Función para finalizar la simulación
 def finalizar_simulacion():
